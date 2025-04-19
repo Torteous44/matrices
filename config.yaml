@@ -1,0 +1,94 @@
+---
+# 3D Reconstruction Configuration
+
+# Input/Output
+io:
+  input_dir: "data/sample"
+  output_dir: "results"
+  save_intermediate: true
+
+# Feature Detection and Matching
+feature:
+  method: "sift"  # Options: "sift", "orb"
+  detector:
+    sift:
+      n_features: 2000
+      contrast_threshold: 0.04
+      edge_threshold: 10
+    orb:
+      n_features: 2000
+      scale_factor: 1.2
+      n_levels: 8
+  matcher:
+    ratio_test: 0.75
+    cross_check: true
+
+# Geometry
+geometry:
+  fundamental:
+    method: "8point"
+    ransac:
+      threshold: 1.0
+      confidence: 0.99
+      max_iterations: 1000
+  pnp:
+    method: "epnp"
+    ransac:
+      threshold: 2.0
+      confidence: 0.99
+      max_iterations: 1000
+
+# Structure from Motion
+sfm:
+  init_pair_method: "max_inliers"  # Options: "max_inliers", "sequential"
+  min_inliers_initialization: 50
+  min_inliers_registration: 30
+  global_bundle_freq: 5
+  global_bundle_max_rmse: 1.0
+
+# Bundle Adjustment
+bundle:
+  max_iterations: 100
+  function_tolerance: 1e-6
+  gradient_tolerance: 1e-10
+  parameter_tolerance: 1e-8
+  fix_intrinsics: true
+  verbose: true
+
+# Dense Reconstruction
+dense:
+  method: "mvs"  # Options: "mvs", "nerf"
+  mvs:
+    num_views: 5
+    window_size: 11
+    min_disp: 0
+    max_disp: 128
+  nerf:
+    encoding_level: 6
+    n_layers: 4
+    hidden_dim: 128
+    n_iters: 1000
+    batch_size: 256
+
+# Mesh Reconstruction
+mesh:
+  method: "poisson"
+  poisson:
+    depth: 8
+    scale: 1.1
+    samples_per_node: 1.5
+  texture:
+    method: "view_blend"
+    resolution: 2048
+
+# Visualization
+visualization:
+  show_sparse: true
+  show_dense: true
+  show_mesh: true
+  window_size: [1280, 720]
+
+# Logging
+logging:
+  level: "INFO"
+  save_report: true
