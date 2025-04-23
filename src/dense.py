@@ -21,6 +21,7 @@ def run_dense(
     images: List[np.ndarray],
     poses: List[np.ndarray],
     K: np.ndarray,
+    new_to_old: Dict[int, int],
     mode: str = "mvs",
     config: Optional[Dict] = None
 ) -> np.ndarray:
@@ -30,6 +31,7 @@ def run_dense(
         images: List of input images
         poses: List of camera poses [R|t]
         K: Camera intrinsic matrix
+        new_to_old: Map from new image indices to old image indices
         mode: Reconstruction mode, either "mvs" (Multi-View Stereo) or "nerf" (Neural Radiance Fields)
         config: Optional configuration parameters
 
@@ -43,9 +45,9 @@ def run_dense(
     logger.info(f"Starting dense reconstruction using {mode.upper()}")
     
     if mode.lower() == "mvs":
-        point_cloud = run_mvs(images, poses, K, config)
+        point_cloud = run_mvs(images, poses, K, new_to_old, config)
     elif mode.lower() == "nerf":
-        point_cloud = run_nerf(images, poses, K, config)
+        point_cloud = run_nerf(images, poses, K, new_to_old, config)
     else:
         raise ValueError(f"Unknown dense reconstruction mode: {mode}")
     
@@ -62,6 +64,7 @@ def run_mvs(
     images: List[np.ndarray],
     poses: List[np.ndarray],
     K: np.ndarray,
+    new_to_old: Dict[int, int],
     config: Dict
 ) -> np.ndarray:
     """Run Multi-View Stereo to generate a dense point cloud.
@@ -73,6 +76,7 @@ def run_mvs(
         images: List of input images
         poses: List of camera poses [R|t]
         K: Camera intrinsic matrix
+        new_to_old: Map from new image indices to old image indices
         config: Configuration parameters for MVS
 
     Returns:
@@ -84,23 +88,26 @@ def run_mvs(
     min_disp = config.get("min_disp", 0)
     max_disp = config.get("max_disp", 128)
     
-    # Create PatchMatch Stereo object
-    stereo = cv2.stereo.createRightMatcher(
-        cv2.stereo.StereoBinarySGBM_create(
-            minDisparity=min_disp,
-            numDisparities=max_disp - min_disp,
-            blockSize=window_size
-        )
-    )
+    # Configure stereo matcher for right view (used for WLS filter)
+    left_matcher = cv2.StereoBM_create(numDisparities=16*config["stereo_bm"]["num_disparities"],
+                                        blockSize=config["stereo_bm"]["block_size"])
+    
+    # Changed cv2.stereo.createRightMatcher to cv2.ximgproc.createRightMatcher
+    stereo = cv2.ximgproc.createRightMatcher(left_matcher)
+    wls_filter = cv2.ximgproc.createDisparityWLSFilter(matcher_left=left_matcher)
+    wls_filter.setLambda(config["wls_filter"]["lambda"])
+    wls_filter.setSigmaColor(config["wls_filter"]["sigma_color"])
     
     # Initialize empty point cloud
     points = []
     colors = []
     
-    # For each image as reference
-    for ref_idx in tqdm(range(len(images)), desc="MVS depth maps"):
-        ref_img = images[ref_idx]
-        ref_pose = poses[ref_idx]
+    # Iterate over pose indices (0 to M-1)
+    for ref_pose_idx in tqdm(range(len(poses)), desc="MVS depth maps"):
+        # Get original image index using the map
+        original_ref_idx = new_to_old[ref_pose_idx]
+        ref_img = images[original_ref_idx]
+        ref_pose = poses[ref_pose_idx]
         
         # Convert to grayscale if color
         if len(ref_img.shape) == 3:
@@ -108,16 +115,18 @@ def run_mvs(
         else:
             ref_gray = ref_img
         
-        # Find best neighbor views
-        neighbor_indices = find_best_neighbor_views(poses, ref_idx, num_views)
+        # Find best neighbor views (using pose indices 0..M-1)
+        neighbor_pose_indices = find_best_neighbor_views(poses, ref_pose_idx, num_views)
         
-        if not neighbor_indices:
+        if not neighbor_pose_indices:
             continue
         
         # For each neighbor, compute depth map
-        for neighbor_idx in neighbor_indices:
-            neighbor_img = images[neighbor_idx]
-            neighbor_pose = poses[neighbor_idx]
+        for neighbor_pose_idx in neighbor_pose_indices:
+            # Get original image index for neighbor
+            original_neighbor_idx = new_to_old[neighbor_pose_idx]
+            neighbor_img = images[original_neighbor_idx]
+            neighbor_pose = poses[neighbor_pose_idx]
             
             # Convert to grayscale if color
             if len(neighbor_img.shape) == 3:
@@ -125,13 +134,13 @@ def run_mvs(
             else:
                 neighbor_gray = neighbor_img
             
-            # Compute disparity
+            # Compute disparity (uses grayscale images)
             disparity = compute_disparity(ref_gray, neighbor_gray, stereo)
             
-            # Convert disparity to depth
+            # Convert disparity to depth (uses poses)
             depth = disparity_to_depth(disparity, K, ref_pose, neighbor_pose)
             
-            # Project depth map to 3D points
+            # Project depth map to 3D points (uses original color ref_img and ref_pose)
             pts, cols = depth_to_points(depth, ref_img, K, ref_pose)
             
             # Add to point cloud
@@ -332,6 +341,7 @@ def run_nerf(
     images: List[np.ndarray],
     poses: List[np.ndarray],
     K: np.ndarray,
+    new_to_old: Dict[int, int],
     config: Dict
 ) -> np.ndarray:
     """Run Neural Radiance Fields (NeRF) to generate a dense point cloud.
@@ -342,6 +352,7 @@ def run_nerf(
         images: List of input images
         poses: List of camera poses [R|t]
         K: Camera intrinsic matrix
+        new_to_old: Map from new image indices to old image indices
         config: Configuration parameters for NeRF
 
     Returns:

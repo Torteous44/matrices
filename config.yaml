@@ -20,7 +20,7 @@ feature:
       scale_factor: 1.2
       n_levels: 8
   matcher:
-    ratio_test: 0.75
+    ratio_test: 0.7
     cross_check: true
 
 # Geometry
@@ -40,15 +40,15 @@ geometry:
 
 # Structure from Motion
 sfm:
-  init_pair_method: "max_inliers"  # Options: "max_inliers", "sequential"
+  init_pair_method: "max_inliers"
   min_inliers_initialization: 50
   min_inliers_registration: 30
-  global_bundle_freq: 5
+  global_bundle_freq: 3
   global_bundle_max_rmse: 1.0
 
 # Bundle Adjustment
 bundle:
-  max_iterations: 100
+  max_iterations: 150
   function_tolerance: 1e-6
   gradient_tolerance: 1e-10
   parameter_tolerance: 1e-8
@@ -58,6 +58,12 @@ bundle:
 # Dense Reconstruction
 dense:
   method: "mvs"  # Options: "mvs", "nerf"
+  stereo_bm:
+    num_disparities: 6
+    block_size: 15
+  wls_filter:
+    lambda: 8000.0
+    sigma_color: 1.5
   mvs:
     num_views: 5
     window_size: 11
