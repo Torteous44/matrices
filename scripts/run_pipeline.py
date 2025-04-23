@@ -203,7 +203,7 @@ def incremental_sfm(
     matches: Dict[Tuple[int, int], np.ndarray],
     K: np.ndarray,
     config: Dict
-) -> Tuple[List[np.ndarray], np.ndarray, Dict[Tuple[int, int], np.ndarray]]:
+) -> Tuple[List[np.ndarray], np.ndarray, Dict[Tuple[int, int], np.ndarray], Dict[int, int]]:
     """Run incremental Structure from Motion.
 
     Args:
@@ -213,7 +213,7 @@ def incremental_sfm(
         config: Configuration dictionary
 
     Returns:
-        Tuple of (camera_poses, points3d, observations)
+        Tuple of (camera_poses, points3d, observations, new_to_old)
     """
     logger.info("Starting incremental Structure from Motion")
     
@@ -333,16 +333,25 @@ def incremental_sfm(
                 for point3d_idx, obs_indices in point3d_to_observations.items():
                     # Check if registered image has this point
                     for obs_cam_idx, obs_point_idx in obs_indices:
-                        if obs_cam_idx == registered_images.index(reg_idx):
-                            # Compare coordinates
-                            obs_point = observations[(obs_cam_idx, obs_point_idx)]
-                            if np.allclose(obs_point, point[2:4], atol=1):
-                                # Found a match, add to PnP correspondences
-                                points2d.append(point[:2])
-                                points3d_idx.append(point3d_idx)
-                                break
+                        # Use direct comparison instead of .index()
+                        if obs_cam_idx == reg_idx:
+                            # Check if observation key exists before accessing
+                            if (obs_cam_idx, obs_point_idx) in observations:
+                                # Compare coordinates
+                                obs_point = observations[(obs_cam_idx, obs_point_idx)]
+                                if np.allclose(obs_point, point[2:4], atol=1):
+                                    # Found a match, add to PnP correspondences
+                                    points2d.append(point[:2])
+                                    points3d_idx.append(point3d_idx)
+                                    break # Found correspondence for this 3D point, move to next match_point
+                            # else: Observation key doesn't exist (likely filtered), continue inner loop
                     else:
+                        # If the inner loop (`for obs_cam_idx...`) completes without `break`,
+                        # continue to the next `point3d_idx`
                         continue
+                    # If the inner loop (`for obs_cam_idx...`) *did* break (meaning a match was found
+                    # for `point`), then break the outer loop (`for point3d_idx...`) as well
+                    # to move on to the next `point` in `match_points`.
                     break
         
         # Check if we have enough correspondences
@@ -370,8 +379,14 @@ def incremental_sfm(
         registered_images.add(best_image_idx)
         remaining_images.remove(best_image_idx)
         
+        # --- REMOVE THIS BLOCK ---
         # Map from old to new image indices
-        old_to_new = {idx: i for i, idx in enumerate(sorted(registered_images))}
+        # old_to_new = {idx: i for i, idx in enumerate(sorted(list(registered_images)))}
+        # new_to_old = {i: idx for idx, i in old_to_new.items()}
+        # --- END REMOVE BLOCK ---
+
+        # --- THIS BLOCK NEEDS TO USE the current map, recalculate it here ---
+        current_old_to_new = {idx: i for i, idx in enumerate(sorted(list(registered_images)))}
         
         # Triangulate new points
         for reg_idx in registered_images - {best_image_idx}:
@@ -396,8 +411,8 @@ def incremental_sfm(
                 match_points = np.hstack((match_points[:, 2:4], match_points[:, :2]))
             
             # Get camera poses
-            pose1 = poses[old_to_new[best_image_idx]]
-            pose2 = poses[old_to_new[reg_idx]]
+            pose1 = poses[current_old_to_new[best_image_idx]]
+            pose2 = poses[current_old_to_new[reg_idx]]
             
             # Create projection matrices
             P1 = K @ pose1
@@ -409,14 +424,17 @@ def incremental_sfm(
                 existing_point = False
                 for point3d_idx, obs_indices in point3d_to_observations.items():
                     for obs_cam_idx, obs_point_idx in obs_indices:
-                        if obs_cam_idx == old_to_new[reg_idx]:
-                            obs_point = observations[(obs_cam_idx, obs_point_idx)]
-                            if np.allclose(obs_point, point[2:4], atol=1):
-                                # Add observation for this 3D point
-                                observations[(old_to_new[best_image_idx], obs_point_idx)] = point[:2]
-                                point3d_to_observations[point3d_idx].append((old_to_new[best_image_idx], obs_point_idx))
-                                existing_point = True
-                                break
+                        # Use the remapped index for comparison
+                        if obs_cam_idx == current_old_to_new[reg_idx]: 
+                            # Check if observation key exists before accessing
+                            if (obs_cam_idx, obs_point_idx) in observations:
+                                obs_point = observations[(obs_cam_idx, obs_point_idx)]
+                                if np.allclose(obs_point, point[2:4], atol=1):
+                                    # Add observation for this 3D point using remapped indices
+                                    observations[(current_old_to_new[best_image_idx], obs_point_idx)] = point[:2]
+                                    point3d_to_observations[point3d_idx].append((current_old_to_new[best_image_idx], obs_point_idx))
+                                    existing_point = True
+                                    break
                     if existing_point:
                         break
                 
@@ -430,14 +448,14 @@ def incremental_sfm(
                         new_point3d_idx = len(points3d)
                         points3d = np.vstack((points3d, X[:3] / X[3]))
                         
-                        # Add observations
-                        observations[(old_to_new[best_image_idx], new_point3d_idx)] = point[:2]
-                        observations[(old_to_new[reg_idx], new_point3d_idx)] = point[2:4]
+                        # Add observations using remapped indices
+                        observations[(current_old_to_new[best_image_idx], new_point3d_idx)] = point[:2]
+                        observations[(current_old_to_new[reg_idx], new_point3d_idx)] = point[2:4]
                         
-                        # Add to point3d_to_observations
+                        # Add to point3d_to_observations using remapped indices
                         point3d_to_observations[new_point3d_idx] = [
-                            (old_to_new[best_image_idx], new_point3d_idx),
-                            (old_to_new[reg_idx], new_point3d_idx)
+                            (current_old_to_new[best_image_idx], new_point3d_idx),
+                            (current_old_to_new[reg_idx], new_point3d_idx)
                         ]
         
         # Run bundle adjustment if needed
@@ -529,12 +547,19 @@ def incremental_sfm(
                 rmse_final = evaluate.reprojection_rmse(poses, points3d, observations, K)
                 logger.info(f"RMSE after filtering: {rmse_final:.4f} pixels")
     
+    # --- KEEP THIS BLOCK AT THE END --- 
+    # Map from old to new image indices
+    # Ensure old_to_new is updated based on the final state of registered_images
+    final_old_to_new = {idx: i for i, idx in enumerate(sorted(list(registered_images)))}
+    new_to_old = {i: idx for idx, i in final_old_to_new.items()}
+    # --- END KEEP BLOCK ---
+
     logger.info(
         f"Incremental SfM complete: {len(registered_images)}/{len(images)} images registered, "
         f"{len(points3d)} points, {len(observations)} observations"
     )
     
-    return poses, points3d, observations
+    return poses, points3d, observations, new_to_old # Add new_to_old map
 
 
 def create_point_cloud_with_colors(
@@ -747,7 +772,7 @@ def run_pipeline(
     
     # === Stage 4: Incremental SfM ===
     with evaluate.Timer("Incremental SfM") as timer:
-        poses, points3d, observations = incremental_sfm(
+        poses, points3d, observations, new_to_old = incremental_sfm(
             images, matches, K, config
         )
         metrics.update_stage_timing("incremental_sfm", timer.elapsed)
@@ -772,7 +797,7 @@ def run_pipeline(
     if dense_method in ["mvs", "nerf"]:
         with evaluate.Timer("Dense Reconstruction") as timer:
             dense_cloud = dense.run_dense(
-                images, poses, K, mode=dense_method, config=config["dense"]
+                images, poses, K, new_to_old, mode=dense_method, config=config["dense"]
             )
             metrics.update_stage_timing("dense_reconstruction", timer.elapsed)
         
