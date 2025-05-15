@@ -10,8 +10,8 @@ A Python implementation of Structure from Motion and Multi-View Stereo algorithm
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/3d-recon-linear-algebra.git
-cd 3d-recon-linear-algebra
+git clone https://github.com/torteous44/matrices.git
+cd matrices
 
 # Create and activate virtual environment
 python -m venv .venv
