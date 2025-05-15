@@ -110,25 +110,4 @@ To train a Neural Radiance Field on your reconstruction:
 python scripts/train_nerf.py --results results/my_reconstruction --output results/my_nerf --epochs 20
 ```
 
-## Citation & License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-If you use this code in your research, please cite:
-
-```
-@software{3d-recon-linear-algebra,
-  author = {Your Name},
-  title = {3D Reconstruction using Linear Algebra},
-  year = {2023},
-  url = {https://github.com/yourusername/3d-recon-linear-algebra}
-}
-```
-
-## Acknowledgments
-
-This project builds upon key algorithms and approaches from the following papers:
-- Hartley & Zisserman, "Multiple View Geometry in Computer Vision"
-- Schönberger & Frahm, "Structure-from-Motion Revisited"
-- Kazhdan et al., "Poisson Surface Reconstruction"
-- Mildenhall et al., "NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis"
